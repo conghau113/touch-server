@@ -1,6 +1,6 @@
-const Comment = require('../models/CommentModel');
+const CommentModel = require('../models/CommentModel');
 const mongoose = require('mongoose');
-const Post = require('../models/PostModel');
+const PostModel = require('../models/PostModel');
 const paginate = require('../util/paginate');
 const cooldown = new Set();
 
@@ -9,7 +9,7 @@ const createComment = async (req, res) => {
     const postId = req.params.id;
     const { content, parentId, userId } = req.body;
 
-    const post = await Post.findById(postId);
+    const post = await PostModel.findById(postId);
 
     if (!post) {
       throw new Error('Post not found');
@@ -24,7 +24,7 @@ const createComment = async (req, res) => {
       cooldown.delete(userId);
     }, 3000);
 
-    const comment = await Comment.create({
+    const comment = await CommentModel.create({
       content,
       parent: parentId,
       post: postId,
@@ -35,7 +35,7 @@ const createComment = async (req, res) => {
 
     await post.save();
 
-    await Comment.populate(comment, { path: 'commenter', select: '-password' });
+    await CommentModel.populate(comment, { path: 'commenter', select: '-password' });
 
     return res.json(comment);
   } catch (err) {
@@ -47,7 +47,7 @@ const getPostComments = async (req, res) => {
   try {
     const postId = req.params.id;
 
-    const comments = await Comment.find({ post: postId }).populate('commenter', '-password').sort('-createdAt');
+    const comments = await CommentModel.find({ post: postId }).populate('commenter', '-password').sort('-createdAt');
 
     let commentParents = {};
     let rootComments = [];
@@ -82,7 +82,7 @@ const getUserComments = async (req, res) => {
     if (!sortBy) sortBy = '-createdAt';
     if (!page) page = 1;
 
-    let comments = await Comment.find({ commenter: userId }).sort(sortBy).populate('post');
+    let comments = await CommentModel.find({ commenter: userId }).sort(sortBy).populate('post');
 
     return res.json(comments);
   } catch (err) {
@@ -99,7 +99,7 @@ const updateComment = async (req, res) => {
       throw new Error('All input required');
     }
 
-    const comment = await Comment.findById(commentId);
+    const comment = await CommentModel.findById(commentId);
 
     if (!comment) {
       throw new Error('Comment not found');
@@ -124,7 +124,7 @@ const deleteComment = async (req, res) => {
     const commentId = req.params.id;
     const { userId, isAdmin } = req.body;
 
-    const comment = await Comment.findById(commentId);
+    const comment = await CommentModel.findById(commentId);
 
     if (!comment) {
       throw new Error('Comment not found');
@@ -136,9 +136,9 @@ const deleteComment = async (req, res) => {
 
     await comment.remove();
 
-    const post = await Post.findById(comment.post);
+    const post = await PostModel.findById(comment.post);
 
-    post.commentCount = (await Comment.find({ post: post._id })).length;
+    post.commentCount = (await CommentModel.find({ post: post._id })).length;
 
     await post.save();
 

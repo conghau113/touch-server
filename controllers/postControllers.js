@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
-const User = require('../models/UserModel');
-const Post = require('../models/PostModel');
-const Comment = require('../models/CommentModel');
+const PostModel = require('../models/PostModel');
+const CommentModel = require('../models/CommentModel');
 const PostLike = require('../models/PostLike');
 const paginate = require('../util/paginate');
 const uploadImage = require('../util/uploadImage');
@@ -29,7 +28,7 @@ const createPost = async (req, res) => {
       cooldown.delete(userId);
     }, 1000);
 
-    const post = await Post.create({
+    const post = await PostModel.create({
       title,
       content,
       image,
@@ -51,7 +50,7 @@ const getPost = async (req, res) => {
       throw new Error('Post does not exist');
     }
 
-    const post = await Post.findById(postId).populate('poster', '-password').lean();
+    const post = await PostModel.findById(postId).populate('poster', '-password').lean();
 
     if (!post) {
       throw new Error('Post does not exist');
@@ -74,7 +73,7 @@ const updatePost = async (req, res) => {
     const postId = req.params.id;
     const { content, title, userId, isAdmin, image } = req.body;
 
-    const post = await Post.findById(postId);
+    const post = await PostModel.findById(postId);
     console.log('post:', post);
 
     if (!post) {
@@ -103,7 +102,7 @@ const deletePost = async (req, res) => {
     const postId = req.params.id;
     const { userId, isAdmin } = req.body;
 
-    const post = await Post.findById(postId);
+    const post = await PostModel.findById(postId);
 
     if (!post) {
       throw new Error('Post does not exist');
@@ -115,7 +114,7 @@ const deletePost = async (req, res) => {
 
     await post.remove();
 
-    await Comment.deleteMany({ post: post._id });
+    await CommentModel.deleteMany({ post: post._id });
 
     return res.json(post);
   } catch (err) {
@@ -206,7 +205,7 @@ const getPosts = async (req, res) => {
     if (!sortBy) sortBy = '-createdAt';
     if (!page) page = 1;
 
-    let posts = await Post.find().populate('poster', '-password').sort(sortBy).lean();
+    let posts = await PostModel.find().populate('poster', '-password').sort(sortBy).lean();
 
     if (author) {
       posts = posts.filter((post) => post.poster.username == author);
@@ -238,7 +237,7 @@ const likePost = async (req, res) => {
     const postId = req.params.id;
     const { userId } = req.body;
 
-    const post = await Post.findById(postId);
+    const post = await PostModel.findById(postId);
 
     if (!post) {
       throw new Error('Post does not exist');
@@ -270,7 +269,7 @@ const unlikePost = async (req, res) => {
     const postId = req.params.id;
     const { userId } = req.body;
 
-    const post = await Post.findById(postId);
+    const post = await PostModel.findById(postId);
 
     if (!post) {
       throw new Error('Post does not exist');

@@ -1,9 +1,9 @@
-const User = require('../models/UserModel');
-const Post = require('../models/PostModel');
+const UserModel = require('../models/UserModel');
+const PostModel = require('../models/PostModel');
 const PostLike = require('../models/PostLike');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const Follow = require('../models/FollowModel');
+const FollowModel = require('../models/FollowModel');
 const { default: mongoose } = require('mongoose');
 
 const options = { new: true, runValidators: true };
@@ -29,9 +29,9 @@ const updateDP = async (req, res) => {
   if (!image) throw new BadRequestError('Expected an image');
   const { secure_url: profileImage } = await uploadImage(image);
   const { id } = req.user;
-  const user = await User.findByIdAndUpdate(id, { profileImage }, options).select({ password: 0 });
+  const user = await UserModel.findByIdAndUpdate(id, { profileImage }, options).select({ password: 0 });
   if (!user) throw new NotFoundError(`No user exist with id ${id}`);
-  await Post.updateMany({ createdBy: id }, { userDetails: { name: user.name, image: profileImage } });
+  await PostModel.updateMany({ createdBy: id }, { userDetails: { name: user.name, image: profileImage } });
   res.status(StatusCodes.OK).json({ user });
 };
 
@@ -47,7 +47,7 @@ const register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const existingUser = await User.findOne({
+    const existingUser = await UserModel.findOne({
       $or: [{ email: normalizedEmail }, { username }],
     });
 
@@ -55,7 +55,7 @@ const register = async (req, res) => {
       throw new Error('Email and username must be unique');
     }
 
-    const user = await User.create({
+    const user = await UserModel.create({
       username,
       fullName,
       location,
@@ -82,7 +82,7 @@ const login = async (req, res) => {
 
     const normalizedEmail = email.toLowerCase();
 
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await UserModel.findOne({ email: normalizedEmail });
 
     if (!user) {
       throw new Error('Email or password incorrect');
@@ -107,7 +107,7 @@ const updateUser = async (req, res) => {
   try {
     const { userId, biography, fullName, location, occupation, username } = req.body;
     const avatar = req.body ?? {};
-    const user = await User.findById(userId);
+    const user = await UserModel.findById(userId);
 
     if (!user) {
       throw new Error('User does not exist');
@@ -140,13 +140,13 @@ const follow = async (req, res) => {
     console.log('followingId', followingId);
     console.log('userId', userId);
 
-    const existingFollow = await Follow.find({ userId, followingId });
+    const existingFollow = await FollowModel.find({ userId, followingId });
 
     if (existingFollow) {
       throw new Error('Already following this user');
     }
 
-    const follow = await Follow.create({ userId, followingId });
+    const follow = await FollowModel.create({ userId, followingId });
 
     return res.status(200).json({ data: follow });
   } catch (err) {
@@ -159,7 +159,7 @@ const unfollow = async (req, res) => {
     const followingId = req.params.id;
     const { userId } = req.body;
 
-    const existingFollow = await Follow.find({ userId, followingId });
+    const existingFollow = await FollowModel.find({ userId, followingId });
 
     if (!existingFollow) {
       throw new Error('Not already following user');
@@ -177,7 +177,7 @@ const getFollowers = async (req, res) => {
   try {
     const userId = req.params.id;
 
-    const followers = await Follow.find({ followingId: userId });
+    const followers = await FollowModel.find({ followingId: userId });
 
     return res.status(200).json({ data: followers });
   } catch (err) {
@@ -189,7 +189,7 @@ const getFollowing = async (req, res) => {
   try {
     const userId = req.params.id;
 
-    const following = await Follow.find({ userId });
+    const following = await FollowModel.find({ userId });
 
     return res.status(200).json({ data: following });
   } catch (err) {
@@ -201,13 +201,13 @@ const getUser = async (req, res) => {
   try {
     const username = req.params.username;
 
-    const user = await User.findOne({ username }).select('-password');
+    const user = await UserModel.findOne({ username }).select('-password');
 
     if (!user) {
       throw new Error('User does not exist');
     }
 
-    const posts = await Post.find({ poster: user._id }).populate('poster').sort('-createdAt');
+    const posts = await PostModel.find({ poster: user._id }).populate('poster').sort('-createdAt');
 
     let likeCount = 0;
 
@@ -234,7 +234,7 @@ const getRandomUsers = async (req, res) => {
   try {
     let { size } = req.query;
 
-    const users = await User.find().select('-password');
+    const users = await UserModel.find().select('-password');
 
     const randomUsers = [];
 
