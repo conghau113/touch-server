@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
-const Post = require('../models/PostModel');
 const User = require('../models/UserModel');
+const Post = require('../models/PostModel');
 const Comment = require('../models/CommentModel');
 const PostLike = require('../models/PostLike');
 const paginate = require('../util/paginate');
