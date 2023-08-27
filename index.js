@@ -20,7 +20,7 @@ dotenv.config();
 const httpServer = require('http').createServer(app);
 const io = require('socket.io')(httpServer, {
   cors: {
-    origins: ['http://localhost:4000'],
+    origins: ['http://localhost:4000', 'https://touch-server.onrender.com'],
     credentials: true,
   },
 });

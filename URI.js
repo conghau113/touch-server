@@ -1,7 +1,5 @@
 const isDevelopmentMode = process.env.MODE === 'DEV';
 
-const clientURL = isDevelopmentMode
-  ? 'http://localhost:4000'
-  : ['https://adra-amie.netlify.app', 'https://fb-clone-frontend.vercel.app'];
+const clientURL = isDevelopmentMode ? 'http://localhost:4000' : ['https://touch-server.onrender.com'];
 
 module.exports = { clientURL };
