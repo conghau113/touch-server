@@ -1,121 +1,157 @@
-const Comments = require('../models/commentModel');
-const Posts = require('../models/postModel');
+const Comment = require('../models/CommentModel');
+const mongoose = require('mongoose');
+const Post = require('../models/PostModel');
+const paginate = require('../util/paginate');
+const cooldown = new Set();
 
-const commentControllers = {
-  createComment: async (req, res) => {
-    try {
-      const { postId, content, tag, reply, postUserId } = req.body;
+const createComment = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { content, parentId, userId } = req.body;
 
-      const post = await Posts.findById(postId);
-      if (!post) {
-        return res.status(400).json({ msg: 'Post does not exist.' });
-      }
+    const post = await Post.findById(postId);
 
-      if (reply) {
-        const cm = await Comments.findById(reply);
-        if (!cm) {
-          return res.status(400).json({ msg: 'Comment does not exist.' });
-        }
-      }
-
-      const newComment = new Comments({
-        user: req.user._id,
-        content,
-        tag,
-        reply,
-        postUserId,
-        postId,
-      });
-
-      await Posts.findOneAndUpdate(
-        { _id: postId },
-        {
-          $push: { comments: newComment._id },
-        },
-        { new: true }
-      );
-
-      await newComment.save();
-      res.json({ newComment });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
+    if (!post) {
+      throw new Error('Post not found');
     }
-  },
 
-  updateComment: async (req, res) => {
-    try {
-      const { content } = req.body;
-
-      await Comments.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, { content });
-
-      res.json({ msg: 'updated successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
+    if (cooldown.has(userId)) {
+      throw new Error('You are commenting too frequently. Please try again shortly.');
     }
-  },
 
-  likeComment: async (req, res) => {
-    try {
-      const comment = await Comments.find({
-        _id: req.params.id,
-        likes: req.user._id,
-      });
-      if (comment.length > 0) {
-        return res.status(400).json({ msg: 'You have already liked this post' });
-      }
+    cooldown.add(userId);
+    setTimeout(() => {
+      cooldown.delete(userId);
+    }, 3000);
 
-      await Comments.findOneAndUpdate(
-        { _id: req.params.id },
-        {
-          $push: { likes: req.user._id },
-        },
-        {
-          new: true,
-        }
-      );
+    const comment = await Comment.create({
+      content,
+      parent: parentId,
+      post: postId,
+      commenter: userId,
+    });
 
-      res.json({ msg: 'Comment liked successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
+    post.commentCount += 1;
 
-  unLikeComment: async (req, res) => {
-    try {
-      await Comments.findOneAndUpdate(
-        { _id: req.params.id },
-        {
-          $pull: { likes: req.user._id },
-        },
-        {
-          new: true,
-        }
-      );
+    await post.save();
 
-      res.json({ msg: 'Comment unliked successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
+    await Comment.populate(comment, { path: 'commenter', select: '-password' });
 
-  deleteComment: async (req, res) => {
-    try {
-      const comment = await Comments.findOneAndDelete({
-        _id: req.params.id,
-        $or: [{ user: req.user._id }, { postUserId: req.user._id }],
-      });
-
-      await Posts.findOneAndUpdate(
-        { _id: comment.postId },
-        {
-          $pull: { comments: req.params.id },
-        }
-      );
-      res.json({ msg: 'Comment deleted successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
+    return res.json(comment);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 };
 
-module.exports = commentControllers;
+const getPostComments = async (req, res) => {
+  try {
+    const postId = req.params.id;
+
+    const comments = await Comment.find({ post: postId }).populate('commenter', '-password').sort('-createdAt');
+
+    let commentParents = {};
+    let rootComments = [];
+
+    for (let i = 0; i < comments.length; i++) {
+      let comment = comments[i];
+      commentParents[comment._id] = comment;
+    }
+
+    for (let i = 0; i < comments.length; i++) {
+      const comment = comments[i];
+      if (comment.parent) {
+        let commentParent = commentParents[comment.parent];
+        commentParent.children = [...commentParent.children, comment];
+      } else {
+        rootComments = [...rootComments, comment];
+      }
+    }
+
+    return res.json(rootComments);
+  } catch (err) {
+    return res.status(400).json(err.message);
+  }
+};
+
+const getUserComments = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    let { page, sortBy } = req.query;
+
+    if (!sortBy) sortBy = '-createdAt';
+    if (!page) page = 1;
+
+    let comments = await Comment.find({ commenter: userId }).sort(sortBy).populate('post');
+
+    return res.json(comments);
+  } catch (err) {
+    return res.status(400).json(err.message);
+  }
+};
+
+const updateComment = async (req, res) => {
+  try {
+    const commentId = req.params.id;
+    const { userId, content, isAdmin } = req.body;
+
+    if (!content) {
+      throw new Error('All input required');
+    }
+
+    const comment = await Comment.findById(commentId);
+
+    if (!comment) {
+      throw new Error('Comment not found');
+    }
+
+    if (comment.commenter != userId && !isAdmin) {
+      throw new Error('Not authorized to update comment');
+    }
+
+    comment.content = content;
+    comment.edited = true;
+    await comment.save();
+
+    return res.status(200).json(comment);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const deleteComment = async (req, res) => {
+  try {
+    const commentId = req.params.id;
+    const { userId, isAdmin } = req.body;
+
+    const comment = await Comment.findById(commentId);
+
+    if (!comment) {
+      throw new Error('Comment not found');
+    }
+
+    if (comment.commenter != userId && !isAdmin) {
+      throw new Error('Not authorized to delete comment');
+    }
+
+    await comment.remove();
+
+    const post = await Post.findById(comment.post);
+
+    post.commentCount = (await Comment.find({ post: post._id })).length;
+
+    await post.save();
+
+    return res.status(200).json(comment);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+module.exports = {
+  createComment,
+  getPostComments,
+  getUserComments,
+  updateComment,
+  deleteComment,
+};

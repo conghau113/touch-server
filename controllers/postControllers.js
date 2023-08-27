@@ -1,335 +1,340 @@
-const Posts = require('../models/postModel');
-const Comments = require('../models/commentModel');
-const Users = require('../models/userModel');
+const mongoose = require('mongoose');
+const Post = require('../models/PostModel');
+const User = require('../models/UserModel');
+const Comment = require('../models/CommentModel');
+const PostLike = require('../models/PostLike');
+const paginate = require('../util/paginate');
+const uploadImage = require('../util/uploadImage');
 
-class APIfeatures {
-  constructor(query, queryString) {
-    this.query = query;
-    this.queryString = queryString;
+const cooldown = new Set();
+
+USER_LIKES_PAGE_SIZE = 9;
+const options = { new: true, runValidators: true };
+
+const createPost = async (req, res) => {
+  try {
+    console.log('thumbUrl::', req.body);
+
+    const { title, content, userId, image } = req.body;
+
+    if (!(title && content)) {
+      throw new Error('All input required');
+    }
+    if (cooldown.has(userId)) {
+      throw new Error('You are posting too frequently. Please try again shortly.');
+    }
+
+    cooldown.add(userId);
+    setTimeout(() => {
+      cooldown.delete(userId);
+    }, 1000);
+
+    const post = await Post.create({
+      title,
+      content,
+      image,
+      poster: userId,
+    });
+
+    res.json(post);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
-
-  paginating() {
-    const page = this.queryString.page * 1 || 1;
-    const limit = this.queryString.limit * 1 || 9;
-    const skip = (page - 1) * limit;
-    this.query = this.query.skip(skip).limit(limit);
-    return this;
-  }
-}
-
-const postControllers = {
-  createPost: async (req, res) => {
-    try {
-      const { content, images } = req.body;
-
-      if (images.length === 0) {
-        return res.status(400).json({ msg: 'Please add photo(s)' });
-      }
-
-      const newPost = new Posts({
-        content,
-        images,
-        user: req.user._id,
-      });
-      await newPost.save();
-
-      res.json({
-        msg: 'Post created successfully.',
-        newPost: {
-          ...newPost._doc,
-          user: req.user,
-        },
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  getPosts: async (req, res) => {
-    try {
-      const features = new APIfeatures(
-        Posts.find({
-          user: [...req.user.following, req.user._id],
-        }),
-        req.query
-      ).paginating();
-      const posts = await features.query
-        .sort('-createdAt')
-        .populate('user likes', 'avatar username fullname followers')
-        .populate({
-          path: 'comments',
-          populate: {
-            path: 'user likes ',
-            select: '-password',
-          },
-        });
-
-      res.json({
-        msg: 'Success',
-        result: posts.length,
-        posts,
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  updatePost: async (req, res) => {
-    try {
-      const { content, images } = req.body;
-
-      const post = await Posts.findOneAndUpdate(
-        { _id: req.params.id },
-        {
-          content,
-          images,
-        }
-      )
-        .populate('user likes', 'avatar username fullname')
-        .populate({
-          path: 'comments',
-          populate: {
-            path: 'user likes ',
-            select: '-password',
-          },
-        });
-
-      res.json({
-        msg: 'Post updated successfully.',
-        newPost: {
-          ...post._doc,
-          content,
-          images,
-        },
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  likePost: async (req, res) => {
-    try {
-      const post = await Posts.find({
-        _id: req.params.id,
-        likes: req.user._id,
-      });
-      if (post.length > 0) {
-        return res.status(400).json({ msg: 'You have already liked this post' });
-      }
-
-      const like = await Posts.findOneAndUpdate(
-        { _id: req.params.id },
-        {
-          $push: { likes: req.user._id },
-        },
-        {
-          new: true,
-        }
-      );
-
-      if (!like) {
-        return res.status(400).json({ msg: 'Post does not exist.' });
-      }
-
-      res.json({ msg: 'Post liked successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  unLikePost: async (req, res) => {
-    try {
-      const like = await Posts.findOneAndUpdate(
-        { _id: req.params.id },
-        {
-          $pull: { likes: req.user._id },
-        },
-        {
-          new: true,
-        }
-      );
-
-      if (!like) {
-        return res.status(400).json({ msg: 'Post does not exist.' });
-      }
-
-      res.json({ msg: 'Post unliked successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  getUserPosts: async (req, res) => {
-    try {
-      const features = new APIfeatures(Posts.find({ user: req.params.id }), req.query).paginating();
-      const posts = await features.query.sort('-createdAt');
-
-      res.json({
-        posts,
-        result: posts.length,
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  getPost: async (req, res) => {
-    try {
-      const post = await Posts.findById(req.params.id)
-        .populate('user likes', 'avatar username fullname followers')
-        .populate({
-          path: 'comments',
-          populate: {
-            path: 'user likes ',
-            select: '-password',
-          },
-        });
-
-      if (!post) {
-        return res.status(400).json({ msg: 'Post does not exist.' });
-      }
-
-      res.json({ post });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  getPostDiscover: async (req, res) => {
-    try {
-      const newArr = [...req.user.following, req.user._id];
-
-      const num = req.query.num || 8;
-
-      const posts = await Posts.aggregate([{ $match: { user: { $nin: newArr } } }, { $sample: { size: Number(num) } }]);
-
-      res.json({
-        msg: 'Success',
-        result: posts.length,
-        posts,
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  deletePost: async (req, res) => {
-    try {
-      const post = await Posts.findOneAndDelete({
-        _id: req.params.id,
-        user: req.user._id,
-      });
-
-      await Comments.deleteMany({ _id: { $in: post.comments } });
-
-      res.json({
-        msg: 'Post deleted successfully.',
-        newPost: {
-          ...post,
-          user: req.user,
-        },
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  reportPost: async (req, res) => {
-    try {
-      const post = await Posts.find({
-        _id: req.params.id,
-        reports: req.user._id,
-      });
-      if (post.length > 0) {
-        return res.status(400).json({ msg: 'You have already reported this post' });
-      }
-
-      const report = await Posts.findOneAndUpdate(
-        { _id: req.params.id },
-        {
-          $push: { reports: req.user._id },
-        },
-        {
-          new: true,
-        }
-      );
-
-      if (!report) {
-        return res.status(400).json({ msg: 'Post does not exist.' });
-      }
-
-      res.json({ msg: 'Post reported successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  savePost: async (req, res) => {
-    try {
-      const user = await Users.find({
-        _id: req.user._id,
-        saved: req.params.id,
-      });
-      if (user.length > 0) {
-        return res.status(400).json({ msg: 'You have already saved this post.' });
-      }
-
-      const save = await Users.findOneAndUpdate(
-        { _id: req.user._id },
-        {
-          $push: { saved: req.params.id },
-        },
-        {
-          new: true,
-        }
-      );
-
-      if (!save) {
-        return res.status(400).json({ msg: 'User does not exist.' });
-      }
-
-      res.json({ msg: 'Post saved successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  unSavePost: async (req, res) => {
-    try {
-      const save = await Users.findOneAndUpdate(
-        { _id: req.user._id },
-        {
-          $pull: { saved: req.params.id },
-        },
-        {
-          new: true,
-        }
-      );
-
-      if (!save) {
-        return res.status(400).json({ msg: 'User does not exist.' });
-      }
-
-      res.json({ msg: 'Post removed from collection successfully.' });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
-
-  getSavePost: async (req, res) => {
-    try {
-      const features = new APIfeatures(Posts.find({ _id: { $in: req.user.saved } }), req.query).paginating();
-
-      const savePosts = await features.query.sort('-createdAt');
-
-      res.json({
-        savePosts,
-        result: savePosts.length,
-      });
-    } catch (err) {
-      return res.status(500).json({ msg: err.message });
-    }
-  },
 };
 
-module.exports = postControllers;
+const getPost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { userId } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      throw new Error('Post does not exist');
+    }
+
+    const post = await Post.findById(postId).populate('poster', '-password').lean();
+
+    if (!post) {
+      throw new Error('Post does not exist');
+    }
+
+    if (userId) {
+      await setLiked([post], userId);
+    }
+
+    await enrichWithUserLikePreview([post]);
+
+    return res.json(post);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const updatePost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { content, title, userId, isAdmin, image } = req.body;
+
+    const post = await Post.findById(postId);
+    console.log('post:', post);
+
+    if (!post) {
+      throw new Error('Post does not exist');
+    }
+
+    if (post.poster != userId && !isAdmin) {
+      throw new Error('Not authorized to update post');
+    }
+
+    post.title = title;
+    post.content = content;
+    post.image = image;
+    post.edited = true;
+
+    await post.save();
+
+    return res.json(post);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const deletePost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { userId, isAdmin } = req.body;
+
+    const post = await Post.findById(postId);
+
+    if (!post) {
+      throw new Error('Post does not exist');
+    }
+
+    if (post.poster != userId && !isAdmin) {
+      throw new Error('Not authorized to delete post');
+    }
+
+    await post.remove();
+
+    await Comment.deleteMany({ post: post._id });
+
+    return res.json(post);
+  } catch (err) {
+    console.log(err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const setLiked = async (posts, userId) => {
+  let searchCondition = {};
+  if (userId) searchCondition = { userId };
+
+  const userPostLikes = await PostLike.find(searchCondition); //userId needed
+
+  posts.forEach((post) => {
+    userPostLikes.forEach((userPostLike) => {
+      if (userPostLike.postId.equals(post._id)) {
+        post.liked = true;
+        return;
+      }
+    });
+  });
+};
+
+const enrichWithUserLikePreview = async (posts) => {
+  const postMap = posts.reduce((result, post) => {
+    result[post._id] = post;
+    return result;
+  }, {});
+
+  const postLikes = await PostLike.find({
+    postId: { $in: Object.keys(postMap) },
+  })
+    .limit(200)
+    .populate('userId', 'username');
+
+  postLikes.forEach((postLike) => {
+    const post = postMap[postLike.postId];
+    if (!post.userLikePreview) {
+      post.userLikePreview = [];
+    }
+    post.userLikePreview.push(postLike.userId);
+  });
+};
+
+const getUserLikedPosts = async (req, res) => {
+  try {
+    const likerId = req.params.id;
+    const { userId } = req.body;
+    let { page, sortBy } = req.query;
+
+    if (!sortBy) sortBy = '-createdAt';
+    if (!page) page = 1;
+
+    let posts = await PostLike.find({ userId: likerId })
+      .sort(sortBy)
+      .populate({ path: 'postId', populate: { path: 'poster' } })
+      .lean();
+
+    posts = paginate(posts, 10, page);
+
+    const count = posts.length;
+
+    let responsePosts = [];
+    posts.forEach((post) => {
+      responsePosts.push(post.postId);
+    });
+
+    if (userId) {
+      await setLiked(responsePosts, userId);
+    }
+
+    await enrichWithUserLikePreview(responsePosts);
+
+    return res.json({ data: responsePosts, count });
+  } catch (err) {
+    console.log(err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const getPosts = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    let { page, sortBy, author, search, liked } = req.query;
+
+    if (!sortBy) sortBy = '-createdAt';
+    if (!page) page = 1;
+
+    let posts = await Post.find().populate('poster', '-password').sort(sortBy).lean();
+
+    if (author) {
+      posts = posts.filter((post) => post.poster.username == author);
+    }
+
+    if (search) {
+      posts = posts.filter((post) => post.title.toLowerCase().includes(search.toLowerCase()));
+    }
+
+    const count = posts.length;
+
+    posts = paginate(posts, 10, page);
+
+    if (userId) {
+      await setLiked(posts, userId);
+    }
+
+    await enrichWithUserLikePreview(posts);
+
+    return res.json({ data: posts, count });
+  } catch (err) {
+    console.log(err.message);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const likePost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { userId } = req.body;
+
+    const post = await Post.findById(postId);
+
+    if (!post) {
+      throw new Error('Post does not exist');
+    }
+
+    const existingPostLike = await PostLike.findOne({ postId, userId });
+
+    if (existingPostLike) {
+      throw new Error('Post is already liked');
+    }
+
+    await PostLike.create({
+      postId,
+      userId,
+    });
+
+    post.likeCount = (await PostLike.find({ postId })).length;
+
+    await post.save();
+
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const unlikePost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { userId } = req.body;
+
+    const post = await Post.findById(postId);
+
+    if (!post) {
+      throw new Error('Post does not exist');
+    }
+
+    const existingPostLike = await PostLike.findOne({ postId, userId });
+
+    if (!existingPostLike) {
+      throw new Error('Post is already not liked');
+    }
+
+    await existingPostLike.remove();
+
+    post.likeCount = (await PostLike.find({ postId })).length;
+
+    await post.save();
+
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+const getUserLikes = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const { anchor } = req.query;
+
+    const postLikesQuery = PostLike.find({ postId: postId })
+      .sort('_id')
+      .limit(USER_LIKES_PAGE_SIZE + 1)
+      .populate('userId', 'username');
+
+    if (anchor) {
+      postLikesQuery.where('_id').gt(anchor);
+    }
+
+    const postLikes = await postLikesQuery.exec();
+
+    const hasMorePages = postLikes.length > USER_LIKES_PAGE_SIZE;
+
+    if (hasMorePages) postLikes.pop();
+
+    const userLikes = postLikes.map((like) => {
+      return {
+        id: like._id,
+        username: like.userId.username,
+      };
+    });
+
+    return res.status(400).json({ userLikes: userLikes, hasMorePages, success: true });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+module.exports = {
+  getPost,
+  getPosts,
+  createPost,
+  updatePost,
+  deletePost,
+  likePost,
+  unlikePost,
+  getUserLikedPosts,
+  getUserLikes,
+};
