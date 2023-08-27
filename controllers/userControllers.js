@@ -1,9 +1,9 @@
-const UserModel = require('../models/UserModel');
-const PostModel = require('../models/PostModel');
-const PostLike = require('../models/PostLike');
+const UserModel = require('../models/UserModel.js');
+const PostModel = require('../models/PostModel.js');
+const PostLike = require('../models/PostLike.js');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const FollowModel = require('../models/FollowModel');
+const FollowModel = require('../models/FollowModel.js');
 const { default: mongoose } = require('mongoose');
 
 const options = { new: true, runValidators: true };

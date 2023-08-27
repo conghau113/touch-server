@@ -1,6 +1,6 @@
-const CommentModel = require('../models/CommentModel');
+const CommentModel = require('../models/CommentModel.js');
+const PostModel = require('../models/PostModel.js');
 const mongoose = require('mongoose');
-const PostModel = require('../models/PostModel');
 const paginate = require('../util/paginate');
 const cooldown = new Set();
 
